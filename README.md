@@ -1,43 +1,62 @@
-# 📈 Rossmann Sales Forecasting
+# Rossmann Sales Forecasting
 
-**Predicting daily sales for 1,115 drug stores — where tree models beat linear ones by a wide margin, and tuning mattered more than model choice.**
+**A six-week-ahead daily sales forecast for 1,115 Rossmann stores, using only inputs known at forecast time and scored on RMSPE (the competition metric) against naive baselines.**
 
-[![Python](https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![scikit-learn](https://img.shields.io/badge/scikit--learn-F7931E?style=flat-square&logo=scikit-learn&logoColor=white)](https://scikit-learn.org)
-[![pandas](https://img.shields.io/badge/pandas-150458?style=flat-square&logo=pandas&logoColor=white)](https://pandas.pydata.org)
+[![tests](https://github.com/MohanVishe/rossmann-sales-forecasting/actions/workflows/tests.yml/badge.svg)](https://github.com/MohanVishe/rossmann-sales-forecasting/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 
-[**📺 Project walkthrough (video)**](https://youtu.be/iNL6wr-eEA0) · [**📊 Dataset (Kaggle)**](https://www.kaggle.com/competitions/rossmann-store-sales/data) · [**📓 Open in Colab**](https://colab.research.google.com/github/MohanVishe/rossmann-sales-forecasting/blob/main/notebooks/individual-project.ipynb)
+[Dataset (Kaggle competition)](https://www.kaggle.com/competitions/rossmann-store-sales/data) · [2023 project walkthrough (video)](https://youtu.be/iNL6wr-eEA0)
 
 ---
 
 ## The problem
 
-Rossmann operates over 3,000 drug stores across seven European countries. Store managers forecast daily sales up to six weeks ahead, and those forecasts drive staffing and stock. Done by hand across hundreds of stores, the results vary wildly with whoever is doing the forecasting.
-
-The task: predict daily sales per store from 1,017,209 historical records, given promotions, competition, school and state holidays, seasonality and store type.
+Rossmann's store managers forecast daily sales up to six weeks ahead, and those forecasts drive
+staffing and stock. The task is to predict daily sales per store from 1,017,209 historical rows
+(2013-01-01 to 2015-07-31), given promotions, competition, school and state holidays, the
+calendar and store type.
 
 ## Results
 
-R² on a **time-based** train/test split — the later period held out, so the model is never evaluated on data from before what it trained on.
+Holdout: the **last six weeks** (2015-06-20 to 2015-07-31), 40,282 open store-days. Models train
+on 2013-01-01 to 2015-06-19. Every number below is written by `scripts/run_pipeline.py` to
+[`results/metrics.json`](results/metrics.json).
 
-| Model | Train R² | Test R² | Read |
-|---|---:|---:|---|
-| Linear Regression | — | **0.836** | The linear baseline. Explains most of the variance, misses the rest. |
-| Lasso (α = 0.0001) | 0.850 | **0.836** | Regularisation changed essentially nothing — the linear model wasn't overfitting, it was *underfitting*. |
-| Decision Tree (default) | 1.000 | **0.946** | Big jump, and a train R² of exactly 1.0 — memorised the training set completely. |
-| Decision Tree (tuned) | 0.979 | **0.951** | `min_samples_leaf=8`, `min_samples_split=5`. Constraining the tree **lowered** train score and **raised** test score. |
-| **Random Forest (n=80)** | 0.997 | **0.965** | 🏆 Best. Averaging across trees recovers the gain without the single tree's brittleness. |
+| Model | RMSPE ↓ | R² | MAE (€) |
+|---|---:|---:|---:|
+| Naive: store × weekday median | 0.2451 | 0.6916 | 1,258.8 |
+| Naive: same store, same weekday, 364 days earlier | 0.1718 | 0.8306 | 839.5 |
+| Naive: store × weekday × promo median | 0.1449 | 0.8585 | 765.6 |
+| Ridge, store fixed effects + train-fitted store encodings | 0.1567 | 0.8551 | 798.9 |
+| **LightGBM** | **0.1235** | **0.9195** | **589.3** |
 
-### What the numbers say
+**What the numbers say**
 
-**1. The gap between linear and tree models is the whole story.** 0.836 → 0.965 is not a tuning win, it's a statement that the relationships here are not linear. Sales respond to promotions, day of week and holidays in ways that interact — a promotion on a Monday is not a promotion on a Sunday — and a linear model cannot express that no matter how it is regularised.
+1. **LightGBM is the only model that beats the strongest naive baseline.** RMSPE is 0.1235 against
+   0.1449 for the store × weekday × promo median, a 14.8% relative reduction.
+2. **A good baseline is hard to beat.** The store × weekday × promo median beats the linear model.
+   Most of the signal is "which store, which weekday, promo or not", and a lookup table captures
+   that directly. Ridge still has to learn how those factors interact.
+3. **The tree model's gains come from store-level history.** By gain, 81% of LightGBM's splits
+   use the two train-fitted store encodings (store × promo, store × weekday). The rest is calendar,
+   promo and holiday timing.
 
-**2. Lasso confirmed it.** If the linear model had been overfitting, regularisation would have helped. Test R² moved by 0.00005. That is a clean diagnosis: the problem was model capacity, not variance.
+### Project finding: the 2023 scores used a leaked input
 
-**3. The default Decision Tree scored 1.000 on train.** Perfect training accuracy is a warning, not an achievement — the tree grew until every leaf was pure. Tuning it *down* (`min_samples_leaf=8`) cost 0.021 of train score and bought 0.006 of test score. Small in absolute terms, but it's the right direction and it's the lesson: the unconstrained model looked better and generalised worse.
+The 2023 version of this project (`notebooks/original/`) reported test R² rising from 0.836
+(linear) to 0.965 (random forest). Those models took **same-day `Customers`** as an input. Footfall
+on the day being forecast isn't known six weeks in advance, and Kaggle's test set omits it, so
+those scores measured fit given footfall rather than forecasting skill.
 
-**4. Random Forest wins, and still shows a 0.032 train–test gap.** More trees and depth limits would likely close some of it.
+This version removes it and measures the effect directly. The same LightGBM, with the same
+features and rounds plus same-day `Customers`, scores:
+
+| LightGBM on the same holdout | RMSPE | R² | MAE (€) |
+|---|---:|---:|---:|
+| Forecast-time inputs only (the result above) | 0.1235 | 0.9195 | 589.3 |
+| Plus same-day `Customers` (leaky, comparison only) | 0.0628 | 0.9735 | 320.6 |
+
+The leaked input roughly halves the error. The pipeline's tests now keep it out (see Tests).
 
 ---
 
@@ -45,80 +64,101 @@ R² on a **time-based** train/test split — the later period held out, so the m
 
 ```mermaid
 flowchart TD
-    A["Rossmann sales<br/>1,017,209 rows"] --> C["Merge on Store"]
-    B["store.csv<br/>1,115 stores"] --> C
-    C --> D["Clean<br/>median / mode imputation"]
-    D --> E["EDA<br/>univariate · bivariate · correlation"]
-    E --> F["Transform<br/>log · sqrt · one-hot · scale"]
-    F --> G["Time-based split"]
-    G --> H["Linear · Lasso · Tree · Forest"]
-    H --> I["R² comparison"]
+    A["train.csv + store.csv<br/>checksum + row-stat check"] --> B["Row features<br/>calendar · promo · holidays<br/>competition + Promo2 timing"]
+    B --> C["Time split<br/>last 42 days = holdout"]
+    C --> D["Score only open days<br/>with sales > 0"]
+    D --> E["Store encodings<br/>fitted on train only"]
+    E --> F["Baselines · Ridge · LightGBM<br/>log1p(Sales) target"]
+    F --> G["RMSPE · R² · MAE<br/>results/metrics.json"]
 ```
 
-### Decisions that shaped the result
+### Decisions
 
-| Decision | What I did | Why |
+| Decision | Choice | Why |
 |---|---|---|
-| **Closed stores** | Dropped rows where the store was shut | 17% of rows had sales of exactly 0 because the store wasn't open. Training on them teaches the model to predict closure, not demand — a different problem, and it drags the distribution badly. |
-| **Missing `CompetitionDistance`** | Median, not mean | Under 1% missing, but the distribution is strongly right-skewed. The median is resistant to that; the mean would have been pulled up by a handful of very distant competitors. |
-| **Missing categoricals** | Mode | `Promo2SinceWeek` and friends are only missing where the store never joined Promo2. |
-| **Skewed features** | Log on `CompetitionDistance`, square root on `Customers` | Both were heavily right-skewed. Transformation pulls them toward normal, which matters for the linear models and reduces outlier leverage for all of them. |
-| **Train/test split** | **Time-based, not random** | A random split lets the model see the future and predict the past. For a forecasting problem that inflates every score and the model fails the moment it's deployed. |
-| **One-hot encoding** | Fitted on train only | Fitting the encoder on the full dataset leaks test-set category information into training. |
+| **Inputs** | Only what is known at forecast time | Store metadata, the calendar, and the promo and holiday schedule. Kaggle's test file supplies that schedule for the forecast window. `Customers` is never used. |
+| **Split** | Last 6 weeks held out | This matches the six-week horizon managers forecast over. Nothing from the holdout is used for fitting or tuning. |
+| **Tuning** | Inner validation window (2015-05-09 to 2015-06-19) | Ridge's alpha and LightGBM's boosting rounds (early-stopped, 3,061) are chosen inside the training window. The model is then refitted on all training data. |
+| **Scored rows** | `Open == 1` and `Sales > 0` | Closed days have zero sales by definition, and RMSPE is undefined at zero (Kaggle ignores those rows). |
+| **Target** | `log1p(Sales)` | Sales are right-skewed. Error on the log scale tracks relative error, which is what RMSPE measures. |
+| **Competition timing** | Months since the competitor opened, plus an "active yet" flag | `CompetitionDistance` is a snapshot, so a competitor counts only from its opening month. When the opening date is missing, it is flagged as unknown rather than filled with a mode. |
+| **Promo2** | Active only from the store's ISO start week; monthly flag from its own `PromoInterval` | Stores that never joined Promo2 get zeros. No promo calendar is invented for them. |
+| **Store identity** | One-hot in Ridge (fixed effects); train-fitted mean log sales per store, store × weekday and store × promo | A store ID is a label, not a quantity. The encodings are fitted on training rows only. |
+| **Holiday recency** | Days since the last state and school holiday, per store; days to Christmas | Computed only from dates at or before each row. |
 
-### What the EDA found
+### Tests
 
-- **December is the peak month** — a strong, clean seasonal effect
-- **Promotions lift sales**, and 38.2% of records had one running
-- **Customers and sales correlate strongly** (as they must) — the useful part is that `DayOfWeek` correlates *negatively* with both
-- **Sundays are closed**, which pushes Monday slightly up
-- **Store type B outsells every other type**
-- **Closer competition coincides with higher sales** — counterintuitive until you read it as a location signal: competitors cluster where the footfall already is
+`tests/test_features.py` (18 tests, run in CI on Ubuntu and Windows on synthetic data):
 
-### Hypotheses tested
+- **No future leakage.** For several cut-off dates d, the test scrambles every column of every
+  row after d, then checks that the features for dates ≤ d are unchanged. When a future-looking
+  feature was injected on purpose (backward-filled holiday recency), all four cases failed.
+- **No `Customers`.** It is absent from the feature list and dropped from the frame. Changing it
+  changes nothing.
+- **Encoders and baselines are blind to the holdout.** Scrambling holdout targets leaves the
+  encodings and baseline predictions unchanged.
+- **Split, scoring and timing.** Exact six-week split, RMSPE against a hand calculation, Promo2
+  ISO-week starts (including the "Sept" spelling), competition opening months, holiday recency.
 
-| # | Hypothesis | Held up? |
-|---|---|---|
-| 1 | Promotions increase sales | ✅ |
-| 2 | Weekend sales are lower | ✅ (stores closed Sundays) |
-| 3 | Holidays decrease sales | ✅ state holidays; ❌ **school** holidays *increased* sales |
-| 4 | Customers correlate positively with sales | ✅ |
-| 5 | Sales are zero when stores are closed | ✅ — and that's why those rows were dropped |
+## Run it
 
----
+```bash
+uv sync                                   # Python 3.12, exact pins in uv.lock
+uv run pytest                             # tests, no data needed
+uv run python scripts/run_pipeline.py     # needs data/train.csv and data/store.csv (see Data)
+```
 
-## What I'd do differently
+A full run takes about 4-5 minutes on a laptop CPU. Two consecutive runs gave identical metrics.
 
-Written with some distance from the original work.
+## Data
 
-1. **RMSPE, not R².** The Kaggle competition scores on root mean square percentage error, which weights a ₹50 miss on a ₹500 day far more heavily than on a ₹5,000 day. R² is the wrong lens for a business forecasting problem where relative error is what hurts.
-2. **Gradient boosting.** XGBoost and LightGBM are the standard answer for tabular problems this shape and would almost certainly beat 0.965.
-3. **Proper time-series cross-validation** — expanding-window folds rather than one split. A single held-out period can be lucky.
-4. **Richer date features.** Days until/since a holiday, days into a promotion, week of year. The current features treat each day too independently for a problem this seasonal.
-5. **Per-store modelling.** 1,115 stores are pooled into one model. Store-level or clustered models would capture local behaviour the pooled model averages away.
-6. **Feature importance.** The forest computes it for free and it was never extracted — which means the model's own view of what drives sales went unread.
+The data is not committed. It comes from the Kaggle competition
+[Rossmann Store Sales](https://www.kaggle.com/competitions/rossmann-store-sales/data), and its
+use is governed by the [competition rules](https://www.kaggle.com/competitions/rossmann-store-sales/rules),
+which you accept when downloading from Kaggle. Place `train.csv` and `store.csv` in `data/`.
 
----
+Before anything runs, `src/rossmann/data.py` checks the files:
+
+- **SHA-256 checksums**
+  - `train.csv`: `f6e4597c…c1f4cc`
+  - `store.csv`: `f56bd124…afb344`
+- **Shape and date range**: 1,017,209 × 9 and 1,115 × 10 rows; 2013-01-01 to 2015-07-31.
+- **Row stats**: 172,817 closed days; 388,080 promo days; 181,721 school-holiday days;
+  3 stores with no competition distance; 544 without a Promo2 start. These match what the 2023
+  notebook printed from the Kaggle download.
+
+The run in `results/metrics.json` used byte-identical copies of these files. They were fetched
+from two independent public Hugging Face uploads (`AiiN-aini/rossmann-store-sales` and
+`gabrieldilay/rossmann-forecast`), whose checksums agree with each other and with the stats
+above.
+
+## Limitations and next
+
+- **One holdout window.** Next: expanding-window backtests over several six-week windows, to see
+  how much the scores move between periods.
+- **Store metadata is a single snapshot.** Competition distance and assortment are as of the
+  data's release, not as they were on each date.
+- **No lagged sales.** A six-week horizon rules out short lags unless forecasts are made
+  recursively. Next: lags of at least 42 days and rolling store trends.
+- **One pooled model.** Next: check the per-store error distribution, since RMSPE averages over
+  stores with very different volumes.
 
 ## Layout
 
 ```
-├── notebooks/
-│   ├── individual-project.ipynb   # the full analysis — start here
-│   └── team-project.ipynb         # group version of the same problem
-├── docs/
-│   ├── technical-documentation.docx
-│   ├── summary.docx
-│   └── presentation.pptx
-└── README.md
+├── src/rossmann/
+│   ├── data.py          # load + checksum/shape/stat validation
+│   ├── features.py      # forecast-time features, time split, train-only store encoder
+│   └── models.py        # RMSPE, naive baselines, Ridge, LightGBM
+├── scripts/run_pipeline.py   # end-to-end run → results/metrics.json
+├── tests/                    # leakage and feature tests (synthetic data)
+├── results/metrics.json      # the numbers in this README
+└── notebooks/original/       # the 2023 notebooks, kept as history (see the note in each)
 ```
 
-**On authorship:** `individual-project.ipynb` is my own work end to end — the results table above comes from it. `team-project.ipynb` is the group submission for the same problem and is included for completeness.
-
-## Data
-
-Not committed. Download `train.csv` and `store.csv` from the [Kaggle competition page](https://www.kaggle.com/competitions/rossmann-store-sales/data) and place them alongside the notebook.
+The 2023 slide deck and write-ups (`docs/`) were removed from the current tree because they
+report random-split scores as accuracy. They remain in the git history.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Code: MIT, see [LICENSE](LICENSE). Data: Kaggle competition rules (see Data).

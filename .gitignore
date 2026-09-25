@@ -1,0 +1,6 @@
+# Kaggle data is not redistributed here - see README "Data"
+data/
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
