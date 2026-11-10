@@ -5,7 +5,7 @@
 [![tests](https://github.com/MohanVishe/rossmann-sales-forecasting/actions/workflows/tests.yml/badge.svg)](https://github.com/MohanVishe/rossmann-sales-forecasting/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 
-[Dataset (Kaggle competition)](https://www.kaggle.com/competitions/rossmann-store-sales/data) · [2023 project walkthrough (video)](https://youtu.be/iNL6wr-eEA0)
+[Dataset (Kaggle competition)](https://www.kaggle.com/competitions/rossmann-store-sales/data) · [Walkthrough of the 2023 version (video)](https://youtu.be/iNL6wr-eEA0)
 
 ---
 
@@ -122,9 +122,9 @@ Before anything runs, `src/rossmann/data.py` checks the files:
 - **SHA-256 checksums**
   - `train.csv`: `f6e4597c…c1f4cc`
   - `store.csv`: `f56bd124…afb344`
-- **Shape and date range**: 1,017,209 × 9 and 1,115 × 10 rows; 2013-01-01 to 2015-07-31.
-- **Row stats**: 172,817 closed days; 388,080 promo days; 181,721 school-holiday days;
-  3 stores with no competition distance; 544 without a Promo2 start. These match what the 2023
+- **Shape and date range**: 1,017,209 × 9 and 1,115 × 10 rows, 2013-01-01 to 2015-07-31.
+- **Row stats**: 172,817 closed days, 388,080 promo days, 181,721 school-holiday days,
+  3 stores with no competition distance, 544 without a Promo2 start. These match what the 2023
   notebook printed from the Kaggle download.
 
 The run in `results/metrics.json` used byte-identical copies of these files. They were fetched
